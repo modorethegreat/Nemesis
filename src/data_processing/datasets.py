@@ -5,6 +5,7 @@ import numpy as np
 import trimesh
 import json
 import os
+import itertools # Import itertools
 from src.data_processing.mesh_data_extractor import sample_points_from_mesh, normalize_point_cloud, generate_sdf
 
 # The following functions are adapted from the MeshGraphNets repository
@@ -43,34 +44,33 @@ def get_target_property(record):
     return np.mean(record['pressure'][-1])
 
 class MeshDataset(Dataset):
-    def __init__(self, tfrecord_path, num_points=2048, num_sdf_points=1024):
+    def __init__(self, tfrecord_path, num_points=2048, num_sdf_points=1024, is_local=False, batch_size=1):
         self.tfrecord_path = tfrecord_path
         self.num_points = num_points
         self.num_sdf_points = num_sdf_points
         
-        # Get the number of samples in the dataset (this might be slow for very large datasets)
-        # A more efficient way would be to store this in a separate file or meta.json
-        self.length = sum(1 for _ in tf.data.TFRecordDataset(tfrecord_path))
+        # Load a limited number of samples for local mode, otherwise load all
+        if is_local:
+            # Load only a few batches for quick local testing
+            self.dataset = list(itertools.islice(get_tfrecord_iterator(tfrecord_path), batch_size * 2)) # Load 2 batches worth
+        else:
+            # Load the entire dataset into memory (for full training)
+            self.dataset = list(get_tfrecord_iterator(tfrecord_path))
+        self.length = len(self.dataset)
 
     def __len__(self):
         return self.length
 
     def __getitem__(self, idx):
-        # Create a new iterator for each __getitem__ call to ensure independent access
-        # This is not ideal for performance but ensures correctness for now.
-        iterator = get_tfrecord_iterator(self.tfrecord_path)
-        for i, record in enumerate(iterator):
-            if i == idx:
-                if 'mesh_pos' in record:
-                    positions = record['mesh_pos'][-1]
-                elif 'world_pos' in record:
-                    positions = record['world_pos'][-1]
-                else:
-                    raise ValueError("Positions not found in record")
-                cells = record['cells'][-1]
-                break
+        record = self.dataset[idx]
+
+        if 'mesh_pos' in record:
+            positions = record['mesh_pos'][-1]
+        elif 'world_pos' in record:
+            positions = record['world_pos'][-1]
         else:
-            raise IndexError("Dataset index out of range")
+            raise ValueError("Positions not found in record")
+        cells = record['cells'][-1]
 
         # Ensure positions are 3D for trimesh
         if positions.shape[1] == 2:
@@ -82,9 +82,7 @@ class MeshDataset(Dataset):
 
         # Sample points from the mesh surface
         sampled_points, sampled_normals = sample_points_from_mesh(positions_for_trimesh, cells, self.num_points)
-        print(f"  sampled_points shape: {sampled_points.shape}")
         normalized_points = normalize_point_cloud(sampled_points)
-        print(f"  normalized_points shape: {normalized_points.shape}")
 
         # Sample points for SDF calculation
         query_points = np.random.rand(self.num_sdf_points, 3) * 2 - 1 # Points in [-1, 1] cube

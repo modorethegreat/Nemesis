@@ -73,7 +73,7 @@ def main():
         log_message("Please run './setup_data.sh' from the project root to download the dataset.")
         exit(1)
 
-    dataset = MeshDataset(tfrecord_path, args.num_points, args.num_sdf_points)
+    dataset = MeshDataset(tfrecord_path, args.num_points, args.num_sdf_points, is_local=args.local, batch_size=args.batch_size)
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn)
 
     encoder = None # Initialize encoder outside the if blocks
