@@ -43,6 +43,7 @@ Nemesis/
 ├── README.md                 # Project overview (this file)
 ├── NEMESIS.md                # Details on Nemesis Architecture (LMA)
 ├── LGM-1.md                  # Details on Baseline Architecture
+├── setup_data.sh             # Data setup script
 └── Instructions.md           # How to run the project
 ```
 
