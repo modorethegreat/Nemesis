@@ -79,6 +79,14 @@ def main():
             exit(1)
 
     os.makedirs(meshgraphnets_dir, exist_ok=True) # Ensure the specific meshgraphnets directory exists
+    
+    # List contents of meshgraphnets_dir to debug download_dataset.sh location
+    log_message(f"Listing contents of {meshgraphnets_dir}:")
+    try:
+        ls_output = subprocess.run(["ls", "-F", meshgraphnets_dir], capture_output=True, text=True, check=True)
+        log_message(ls_output.stdout)
+    except Exception as e:
+        log_message(f"Error listing directory: {e}")
 
     if not os.path.exists(tfrecord_path):
         log_message(f"Dataset not found at {tfrecord_path}. Downloading {args.dataset}...")
