@@ -4,13 +4,13 @@ This project re-engineers PhysicsX's mesh-to-physical-property prediction pipeli
 
 ## Project Goal
 
-To develop and evaluate a new architecture that leverages Latent Meta Attention (LMA) for more efficient and effective encoding of 3D mesh data, specifically for predicting physical properties in simulation tasks. This involves a direct comparison against a baseline PhysicsX-style encoder.
+To develop and evaluate a new architecture that leverages Latent Meta Attention (LMA) for more efficient and effective encoding of 3D mesh data, specifically for use in building surrogate models predicting physical properties in simulation tasks. This involves a direct comparison against a baseline MLP encoder.
 
 ## Key Objectives
 
 1.  **Superior Latent Compression:** Achieve a more compact latent representation ($z$) without sacrificing critical geometric information.
-2.  **Enhanced or Equivalent Downstream Performance:** Attain equal or better accuracy in surrogate models that predict physical properties from the latent space.
-3.  **Clear Ablation Study:** Provide a rigorous, side-by-side comparison against the baseline PhysicsX-style encoder, using an identical decoder architecture for both.
+2.  **Enhanced or Equivalent Downstream Performance:** Attain equal or better accuracy in surrogate models that predict physical properties from the latent space compared to a standard MLP,
+3.  **Modularity** Provide a modular repository to scale and build future improvements and surrogate models with expanded datasets.
 
 ## Dataset
 
@@ -21,7 +21,7 @@ We utilize the **MeshGraphNets** dataset from DeepMind Research. For the current
 The pipeline consists of two main phases:
 
 1.  **VAE Development (Encoder & Decoder):** Two VAEs are developed:
-    *   **Baseline VAE:** Uses a DiffusionNet-style encoder.
+    *   **Baseline VAE:** Uses an MLP encoder.
     *   **Nemesis VAE:** Incorporates the Latent Meta Attention (LMA) encoder.
     Both VAEs share an identical Modulated ResidualNet decoder, which learns an implicit representation via a Signed Distance Function (SDF).
 
