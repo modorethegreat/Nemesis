@@ -43,17 +43,20 @@ Nemesis/
 └── Instructions.md           # This file
 ```
 
-## 3. Data Download
+## 3. Data Setup
 
-The project uses the MeshGraphNets dataset. The `src/training/main.py` script will automatically download the required `airfoil` dataset if it's not found in the specified `data_dir`.
+The project uses the MeshGraphNets dataset. To set up the data, run the `setup_data.sh` script from the project root directory. This script will:
 
-However, if you prefer to manually download it or encounter issues, you can do so by navigating to the `data/deepmind-research/meshgraphnets/` directory and running the provided shell script:
+*   Create the necessary data directories (`data/deepmind-research/`).
+*   Clone the `deepmind-research` repository if it doesn't already exist.
+*   Make the `download_dataset.sh` script executable.
+*   Download the `airfoil` dataset into `data/deepmind-research/meshgraphnets/datasets/`.
 
 ```bash
-cd data/deepmind-research/meshgraphnets/
-sh download_dataset.sh airfoil datasets/
-cd - # Go back to the project root
+./setup_data.sh
 ```
+
+**Note:** This script only needs to be run once. If you encounter issues, ensure you have `git` and `curl` installed on your system.
 
 ## 4. Running the Training Scripts
 

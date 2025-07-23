@@ -60,47 +60,17 @@ def main():
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     log_message(f"Device = {device}")
-    
-    # Ensure dataset is downloaded
+
+    # Create the dataset and dataloader
     dataset_path = os.path.join(args.data_dir, args.dataset)
     tfrecord_path = os.path.join(dataset_path, 'train.tfrecord')
 
-    # Ensure the deepmind-research repository is cloned and the script directory exists
-    deepmind_research_dir = os.path.join(os.getcwd(), 'data', 'deepmind-research')
-    meshgraphnets_dir = os.path.join(deepmind_research_dir, 'meshgraphnets')
-    
-    if not os.path.exists(deepmind_research_dir):
-        log_message(f"Cloning deepmind-research repository into {deepmind_research_dir}...")
-        try:
-            subprocess.run(["git", "clone", "https://github.com/deepmind/deepmind-research.git", deepmind_research_dir], check=True)
-            log_message("Repository cloned successfully.")
-        except subprocess.CalledProcessError as e:
-            log_message(f"Error cloning repository: {e}")
-            exit(1)
-
-    os.makedirs(meshgraphnets_dir, exist_ok=True) # Ensure the specific meshgraphnets directory exists
-    
-    # List contents of meshgraphnets_dir to debug download_dataset.sh location
-    log_message(f"Listing contents of {meshgraphnets_dir}:")
-    try:
-        ls_output = subprocess.run(["ls", "-F", meshgraphnets_dir], capture_output=True, text=True, check=True)
-        log_message(ls_output.stdout)
-    except Exception as e:
-        log_message(f"Error listing directory: {e}")
-
+    # Check if the dataset exists. If not, instruct the user to run setup_data.sh
     if not os.path.exists(tfrecord_path):
-        log_message(f"Dataset not found at {tfrecord_path}. Downloading {args.dataset}...")
-        download_script_path = os.path.join(meshgraphnets_dir, 'download_dataset.sh')
-        download_command = ["sh", download_script_path, args.dataset, os.path.join(os.getcwd(), args.data_dir)]
-        log_message(f"Executing: {' '.join(download_command)}")
-        try:
-            subprocess.run(download_command, check=True, cwd=meshgraphnets_dir)
-            log_message(f"Successfully downloaded {args.dataset}.")
-        except subprocess.CalledProcessError as e:
-            log_message(f"Error downloading dataset: {e}")
-            exit(1)
+        log_message(f"Error: Dataset not found at {tfrecord_path}.")
+        log_message("Please run './setup_data.sh' from the project root to download the dataset.")
+        exit(1)
 
-    # Create the dataset and dataloader
     dataset = MeshDataset(tfrecord_path, args.num_points, args.num_sdf_points)
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn)
 
