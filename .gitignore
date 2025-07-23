@@ -6,3 +6,6 @@ models/
 
 # Downloaded Data
 data/deepmind-research/
+
+# Test Plan for workflow
+TestPlan.md
