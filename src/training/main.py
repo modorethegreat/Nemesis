@@ -23,12 +23,13 @@ def main():
     parser.add_argument('--num_points', type=int, default=2048)
     parser.add_argument('--num_sdf_points', type=int, default=1024)
     parser.add_argument('--batch_size', type=int, default=32)
-    parser.add_argument('--epochs', type=int, default=10)
+    parser.add_argument('--epochs', type=int, default=5)
     parser.add_argument('--lr', type=float, default=1e-3)
     parser.add_argument('--d0', type=int, default=256, help='Embedding dimension after PointNet backbone')
     parser.add_argument('--heads', type=int, default=8, help='Number of attention heads')
     parser.add_argument('--d_ff', type=int, default=1024, help='Feed-forward dimension in transformer blocks')
     parser.add_argument('--n_blocks', type=int, default=4, help='Number of transformer blocks')
+    parser.add_argument('--scale', type=str, default='1x', choices=['1x', '3x'], help='Model parameter scale (1x or 3x)')
     parser.add_argument('--decoder_hidden_dim', type=int, default=256, help='Hidden dimension for decoder MLPs')
     parser.add_argument('--save_model', action='store_true', help='Save the trained models')
     parser.add_argument('--load_vae_model', type=str, default=None, help='Path to load pre-trained VAE models (encoder and decoder)')
@@ -48,8 +49,8 @@ def main():
         log_file.write(message + "\n")
 
     if args.local:
-        args.batch_size = 5
-        args.epochs = 5
+        args.batch_size = 1
+        args.epochs = 1
         args.num_points = 8
         args.num_sdf_points = 8
         # Drastically reduce model dimensions for very fast local runs
@@ -58,6 +59,14 @@ def main():
         args.d_ff = 32 # Reduced feed-forward dimension
         args.n_blocks = 1 # Single transformer block
         args.decoder_hidden_dim = 16 # Drastically reduced decoder hidden dimension
+    else:
+        # Apply scaling based on args.scale
+        if args.scale == '3x':
+            args.d0 = args.d0 * 2
+            args.heads = args.heads * 2 # Can be adjusted based on desired scaling
+            args.d_ff = args.d_ff * 2
+            args.n_blocks = args.n_blocks * 2
+            args.decoder_hidden_dim = args.decoder_hidden_dim * 2
 
     # Automatically save models if training both VAE and surrogate
     if args.train_mode == 'both':

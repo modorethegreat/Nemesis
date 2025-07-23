@@ -112,7 +112,6 @@ A rigorous framework will compare the "Nemesis" architecture against the baselin
 #### **Model Scaling**
 
 *   The evaluation script will allow for configurable I model scaling. By default, **1x** and **3x** parameter scales will be evaluated.
-*   **Note:** Full implementation of 1x/3x model scaling is a future enhancement. The `--local` flag provides a drastically reduced parameter set for rapid development and testing.
 *   A `--local` command-line argument will be included. When this flag is used, the script will instantiate models with a dramatically reduced parameter count for rapid proof-of-concept validation and development on local machines.
 
 #### **Evaluation Metrics**

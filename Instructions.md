@@ -141,7 +141,3 @@ These commands run very quickly and are ideal for verifying that the pipeline is
 ## 5. Viewing Logs
 
 Training logs are saved in the `logs/` directory. Each run generates a new log file with a timestamp (e.g., `training_log_20250722-143000.txt`). You can view these files with any text editor.
-
-## 6. Model Scaling (Future Work)
-
-The `TestPlan.MD` mentions evaluation with 1x and 3x parameter scales. This feature is not yet fully implemented. The `--local` flag provides a drastically reduced parameter set for rapid development and testing, but a general mechanism for scaling models for full runs is a future enhancement.
