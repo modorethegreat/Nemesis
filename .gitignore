@@ -1,5 +1,8 @@
 # Logs
 logs/
 
+# Saved Models
+models/
+
 # Downloaded Data
 data/deepmind-research/

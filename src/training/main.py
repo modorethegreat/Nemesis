@@ -14,7 +14,7 @@ from src.models.surrogate_models import BaselineSurrogate, NemesisSurrogate # Im
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', type=str, default='baseline', choices=['baseline', 'nemesis'])
-    parser.add_argument('--train_mode', type=str, default='vae', choices=['vae', 'surrogate'], help='Mode of training: vae or surrogate')
+    parser.add_argument('--train_mode', type=str, default='vae', choices=['vae', 'surrogate', 'both'], help='Mode of training: vae or surrogate')
     parser.add_argument('--dataset', type=str, default='airfoil', choices=['airfoil'])
     parser.add_argument('--data_dir', type=str, default='data/deepmind-research/meshgraphnets/datasets')
     parser.add_argument('--num_points', type=int, default=2048)
@@ -54,6 +54,10 @@ def main():
         args.d_ff = 32 # Reduced feed-forward dimension
         args.n_blocks = 1 # Single transformer block
 
+    # Automatically save models if training both VAE and surrogate
+    if args.train_mode == 'both':
+        args.save_model = True
+
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     log_message(f"Device = {device}")
     
@@ -77,8 +81,12 @@ def main():
     dataset = MeshDataset(tfrecord_path, args.num_points, args.num_sdf_points)
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn)
 
+    encoder = None # Initialize encoder outside the if blocks
+    decoder = None # Initialize decoder outside the if blocks
+    decoder_latent_dim = None # Initialize decoder_latent_dim outside the if blocks
+
     # --- VAE Training/Loading Logic ---
-    if args.train_mode == 'vae':
+    if args.train_mode == 'vae' or args.train_mode == 'both':
         # Create VAE models
         if args.model == 'baseline':
             encoder = BaselineVAE(n_blocks=args.n_blocks, d0=args.d0, heads=args.heads, d_ff=args.d_ff).to(device)
@@ -148,23 +156,32 @@ def main():
                 log_message("VAE models saved successfully.")
 
     # --- Surrogate Training/Loading Logic ---
-    elif args.train_mode == 'surrogate':
-        if not args.load_vae_model:
-            log_message("Error: --load_vae_model must be provided for surrogate training.")
-            exit(1)
+    if args.train_mode == 'surrogate' or args.train_mode == 'both':
+        if args.train_mode == 'surrogate':
+            if not args.load_vae_model:
+                log_message("Error: --load_vae_model must be provided for surrogate training.")
+                exit(1)
 
-        # Load pre-trained VAE encoder
-        log_message(f"Loading pre-trained VAE encoder from {args.load_vae_model}...")
-        vae_checkpoint = torch.load(args.load_vae_model, map_location=device)
-        vae_args = vae_checkpoint['args']
+        # Load pre-trained VAE encoder if not already trained in 'both' mode
+        if encoder is None: # This means train_mode was 'surrogate' and VAE was not trained in this run
+            log_message(f"Loading pre-trained VAE encoder from {args.load_vae_model} for surrogate training...")
+            vae_checkpoint = torch.load(args.load_vae_model, map_location=device)
+            vae_args = vae_checkpoint['args']
 
-        if vae_args.model == 'baseline': # This refers to the VAE model type that produced the latent space
-            encoder = BaselineVAE(n_blocks=vae_args.n_blocks, d0=vae_args.d0, heads=vae_args.heads, d_ff=vae_args.d_ff).to(device)
-            surrogate_latent_dim = vae_args.d0 // 2
-        else:
-            encoder = NemesisVAE(n_blocks=vae_args.n_blocks, d0=vae_args.d0, heads=vae_args.heads, d_ff=vae_args.d_ff).to(device)
-            surrogate_latent_dim = (vae_args.d0 // 2) // 2
-        encoder.load_state_dict(vae_checkpoint['encoder_state_dict'])
+            if vae_args.model == 'baseline': # This refers to the VAE model type that produced the latent space
+                encoder = BaselineVAE(n_blocks=vae_args.n_blocks, d0=vae_args.d0, heads=vae_args.heads, d_ff=vae_args.d_ff).to(device)
+                surrogate_latent_dim = vae_args.d0 // 2
+            else:
+                encoder = NemesisVAE(n_blocks=vae_args.n_blocks, d0=vae_args.d0, heads=vae_args.heads, d_ff=vae_args.d_ff).to(device)
+                surrogate_latent_dim = (vae_args.d0 // 2) // 2
+            encoder.load_state_dict(vae_checkpoint['encoder_state_dict'])
+        else: # Encoder was just trained in 'both' mode
+            log_message("Using newly trained VAE encoder for surrogate training.")
+            if args.model == 'baseline':
+                surrogate_latent_dim = args.d0 // 2
+            else:
+                surrogate_latent_dim = (args.d0 // 2) // 2
+
         encoder.eval() # Set encoder to evaluation mode
         for param in encoder.parameters(): # Freeze encoder parameters
             param.requires_grad = False
@@ -207,7 +224,7 @@ def main():
                         z = mu # Use mu as the latent vector for surrogate training
 
                     predictions = surrogate_model(z)
-                    loss = criterion(predictions, labels)
+                    loss = criterion(predictions, labels.unsqueeze(1))
 
                     optimizer.zero_grad()
                     loss.backward()
