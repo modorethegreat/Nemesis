@@ -1,10 +1,13 @@
 import argparse
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, random_split
 import os
 import subprocess
 import datetime
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.metrics import r2_score
 
 from src.data_processing.datasets import MeshDataset, collate_fn
 from src.models.models import BaselineVAE, NemesisVAE
@@ -34,10 +37,10 @@ def main():
     args = parser.parse_args()
 
     # Setup logging
-    log_dir = "logs"
-    os.makedirs(log_dir, exist_ok=True)
     timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    log_file_path = os.path.join(log_dir, f"training_log_{timestamp}.txt")
+    run_log_dir = os.path.join("logs", f"run_{timestamp}")
+    os.makedirs(run_log_dir, exist_ok=True)
+    log_file_path = os.path.join(run_log_dir, f"training_log_{timestamp}.txt")
     log_file = open(log_file_path, "w")
 
     def log_message(message):
@@ -45,8 +48,8 @@ def main():
         log_file.write(message + "\n")
 
     if args.local:
-        args.batch_size = 1
-        args.epochs = 1
+        args.batch_size = 5
+        args.epochs = 5
         args.num_points = 8
         args.num_sdf_points = 8
         # Drastically reduce model dimensions for very fast local runs
@@ -63,7 +66,7 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     log_message(f"Device = {device}")
 
-    # Create the dataset and dataloader
+    # Ensure dataset is downloaded
     dataset_path = os.path.join(args.data_dir, args.dataset)
     tfrecord_path = os.path.join(dataset_path, 'train.tfrecord')
 
@@ -73,8 +76,33 @@ def main():
         log_message("Please run './setup_data.sh' from the project root to download the dataset.")
         exit(1)
 
-    dataset = MeshDataset(tfrecord_path, args.num_points, args.num_sdf_points, is_local=args.local, batch_size=args.batch_size)
-    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn)
+    # Create the full dataset and split into train/validation
+    full_dataset = MeshDataset(tfrecord_path, args.num_points, args.num_sdf_points, is_local=args.local, batch_size=args.batch_size)
+    
+    # Determine split sizes
+    total_samples = len(full_dataset)
+    if args.local:
+        # For local mode, ensure validation set is at least 1 sample if possible
+        train_size = max(1, int(total_samples * 0.8))
+        val_size = total_samples - train_size
+        if val_size == 0 and total_samples > 0: # Ensure at least one sample for validation if possible
+            train_size = total_samples - 1
+            val_size = 1
+        elif total_samples == 0:
+            train_size = 0
+            val_size = 0
+    else:
+        train_size = int(0.8 * total_samples)
+        val_size = total_samples - train_size
+
+    if total_samples == 0:
+        log_message("Error: Dataset is empty. Cannot proceed with training.")
+        exit(1)
+
+    train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
+
+    train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn)
+    val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate_fn)
 
     encoder = None # Initialize encoder outside the if blocks
     decoder = None # Initialize decoder outside the if blocks
@@ -107,10 +135,18 @@ def main():
             log_message("VAE models loaded successfully. Skipping VAE training.")
         else:
             optimizer = torch.optim.Adam(list(encoder.parameters()) + list(decoder.parameters()), lr=args.lr)
+            
+            vae_train_losses = []
+            vae_val_losses = []
+
             log_message("\nStarting VAE training loop...")
             for epoch in range(args.epochs):
                 log_message(f"\n--- Epoch {epoch+1}/{args.epochs} (VAE Training) ---")
-                for batch_idx, batch in enumerate(dataloader):
+                # Training
+                encoder.train()
+                decoder.train()
+                total_train_loss = 0
+                for batch_idx, batch in enumerate(train_dataloader):
                     if args.local and batch_idx > 0:
                         log_message("  (Local mode: Skipping subsequent batches)")
                         break
@@ -125,7 +161,7 @@ def main():
                     z = mu + torch.exp(0.5 * logvar) * torch.randn_like(logvar)
                     sdf_pred = decoder(sdf_points, z)
 
-                    recon_loss = torch.mean((sdf_pred - sdf_values).pow(2))
+                    recon_loss = torch.mean((sdf_pred - sdf_values.unsqueeze(-1)).pow(2))
                     kl_loss = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
                     loss = recon_loss + kl_loss
 
@@ -133,9 +169,51 @@ def main():
                     loss.backward()
                     optimizer.step()
 
+                    total_train_loss += loss.item()
                     log_message(f"  Batch {batch_idx+1} VAE Loss: {loss.item():.4f}")
-                log_message(f"Epoch {epoch+1} finished. Final VAE Loss for epoch: {loss.item():.4f}")
+                avg_train_loss = total_train_loss / (batch_idx + 1)
+                vae_train_losses.append(avg_train_loss)
+
+                # Validation
+                encoder.eval()
+                decoder.eval()
+                total_val_loss = 0
+                with torch.no_grad():
+                    for batch_idx_val, batch_val in enumerate(val_dataloader):
+                        if args.local and batch_idx_val > 0:
+                            break
+                        points_val = batch_val['points'].to(device)
+                        normals_val = batch_val['normals'].to(device)
+                        cells_val = batch_val['cells'].to(device)
+                        sdf_points_val = batch_val['sdf_points'].to(device)
+                        sdf_values_val = batch_val['sdf_values'].to(device)
+
+                        mu_val, logvar_val = encoder(data={'points': points_val, 'normals': normals_val, 'cells': cells_val})
+                        z_val = mu_val + torch.exp(0.5 * logvar_val) * torch.randn_like(logvar_val)
+                        sdf_pred_val = decoder(sdf_points_val, z_val)
+
+                        recon_loss_val = torch.mean((sdf_pred_val - sdf_values_val.unsqueeze(-1)).pow(2))
+                        kl_loss_val = -0.5 * torch.mean(1 + logvar_val - mu_val.pow(2) - logvar_val.exp())
+                        loss_val = recon_loss_val + kl_loss_val
+                        total_val_loss += loss_val.item()
+                avg_val_loss = total_val_loss / (batch_idx_val + 1)
+                vae_val_losses.append(avg_val_loss)
+
+                log_message(f"Epoch {epoch+1} finished. Train Loss: {avg_train_loss:.4f}, Val Loss: {avg_val_loss:.4f}")
             log_message("\nVAE Training loop finished.")
+
+            # Plot VAE Convergence
+            plt.figure(figsize=(10, 5))
+            plt.plot(vae_train_losses, label='Train Loss')
+            plt.plot(vae_val_losses, label='Validation Loss')
+            plt.title('VAE Convergence')
+            plt.xlabel('Epoch')
+            plt.ylabel('Loss')
+            plt.legend()
+            plt.grid(True)
+            plt.savefig(os.path.join(run_log_dir, 'vae_convergence.png'))
+            plt.close()
+            log_message(f"VAE convergence plot saved to {os.path.join(run_log_dir, 'vae_convergence.png')}")
 
             if args.save_model:
                 model_dir = "models"
@@ -201,10 +279,17 @@ def main():
             optimizer = torch.optim.Adam(surrogate_model.parameters(), lr=args.lr)
             criterion = nn.L1Loss() # MAE Loss
 
+            surrogate_train_losses = []
+            surrogate_val_losses = []
+            surrogate_val_r2_scores = []
+
             log_message("\nStarting Surrogate training loop...")
             for epoch in range(args.epochs):
                 log_message(f"\n--- Epoch {epoch+1}/{args.epochs} (Surrogate Training) ---")
-                for batch_idx, batch in enumerate(dataloader):
+                # Training
+                surrogate_model.train()
+                total_train_loss = 0
+                for batch_idx, batch in enumerate(train_dataloader):
                     if args.local and batch_idx > 0:
                         log_message("  (Local mode: Skipping subsequent batches)")
                         break
@@ -225,9 +310,68 @@ def main():
                     loss.backward()
                     optimizer.step()
 
+                    total_train_loss += loss.item()
                     log_message(f"  Batch {batch_idx+1} Surrogate MAE Loss: {loss.item():.4f}")
-                log_message(f"Epoch {epoch+1} finished. Final Surrogate MAE Loss for epoch: {loss.item():.4f}")
+                avg_train_loss = total_train_loss / (batch_idx + 1)
+                surrogate_train_losses.append(avg_train_loss)
+
+                # Validation
+                surrogate_model.eval()
+                total_val_loss = 0
+                all_predictions = []
+                all_labels = []
+                with torch.no_grad():
+                    for batch_idx_val, batch_val in enumerate(val_dataloader):
+                        if args.local and batch_idx_val > 0:
+                            break
+                        points_val = batch_val['points'].to(device)
+                        normals_val = batch_val['normals'].to(device)
+                        cells_val = batch_val['cells'].to(device)
+                        labels_val = batch_val['label'].to(device)
+
+                        mu_val, logvar_val = encoder(data={'points': points_val, 'normals': normals_val, 'cells': cells_val})
+                        z_val = mu_val
+
+                        predictions_val = surrogate_model(z_val)
+                        loss_val = criterion(predictions_val, labels_val.unsqueeze(1))
+                        total_val_loss += loss_val.item()
+
+                        all_predictions.extend(predictions_val.cpu().numpy().flatten())
+                        all_labels.extend(labels_val.cpu().numpy().flatten())
+                
+                avg_val_loss = total_val_loss / (batch_idx_val + 1)
+                surrogate_val_losses.append(avg_val_loss)
+                
+                # Calculate R-squared
+                r2 = r2_score(all_labels, all_predictions)
+                surrogate_val_r2_scores.append(r2)
+
+                log_message(f"Epoch {epoch+1} finished. Train MAE: {avg_train_loss:.4f}, Val MAE: {avg_val_loss:.4f}, Val R^2: {r2:.4f}")
             log_message("\nSurrogate Training loop finished.")
+
+            # Plot Surrogate Convergence
+            plt.figure(figsize=(10, 5))
+            plt.plot(surrogate_train_losses, label='Train MAE')
+            plt.plot(surrogate_val_losses, label='Validation MAE')
+            plt.title('Surrogate Model Convergence (MAE)')
+            plt.xlabel('Epoch')
+            plt.ylabel('MAE')
+            plt.legend()
+            plt.grid(True)
+            plt.savefig(os.path.join(run_log_dir, 'surrogate_mae_convergence.png'))
+            plt.close()
+            log_message(f"Surrogate MAE convergence plot saved to {os.path.join(run_log_dir, 'surrogate_mae_convergence.png')}")
+
+            plt.figure(figsize=(10, 5))
+            plt.plot(surrogate_val_r2_scores, label='Validation R^2', color='green')
+            plt.title('Surrogate Model R^2 Score')
+            plt.xlabel('Epoch')
+            plt.ylabel('R^2 Score')
+            plt.legend()
+            plt.grid(True)
+            plt.savefig(os.path.join(run_log_dir, 'surrogate_r2_score.png'))
+            plt.close()
+            log_message(f"Surrogate R^2 score plot saved to {os.path.join(run_log_dir, 'surrogate_r2_score.png')}")
 
             if args.save_model:
                 model_dir = "models"

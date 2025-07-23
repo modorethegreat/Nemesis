@@ -3,3 +3,6 @@ torch_geometric
 numpy
 tensorflow
 trimesh
+rtree
+matplotlib
+scikit-learn
