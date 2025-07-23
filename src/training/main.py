@@ -23,7 +23,8 @@ def main():
     parser.add_argument('--num_points', type=int, default=2048)
     parser.add_argument('--num_sdf_points', type=int, default=1024)
     parser.add_argument('--batch_size', type=int, default=32)
-    parser.add_argument('--epochs', type=int, default=5)
+    parser.add_argument('--epochs', type=int, default=5, help='Number of epochs for VAE training')
+    parser.add_argument('--surrogate_epochs', type=int, default=10, help='Number of epochs for Surrogate training')
     parser.add_argument('--lr', type=float, default=1e-3)
     parser.add_argument('--d0', type=int, default=256, help='Embedding dimension after PointNet backbone')
     parser.add_argument('--heads', type=int, default=8, help='Number of attention heads')
@@ -50,7 +51,8 @@ def main():
 
     if args.local:
         args.batch_size = 1
-        args.epochs = 1
+        args.epochs = 1 # VAE epochs for local mode
+        args.surrogate_epochs = 1 # Surrogate epochs for local mode
         args.num_points = 8
         args.num_sdf_points = 8
         # Drastically reduce model dimensions for very fast local runs
@@ -112,6 +114,9 @@ def main():
 
     train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn)
     val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate_fn)
+
+    log_message(f"\nNumber of training batches per epoch: {len(train_dataloader)}")
+    log_message(f"Number of validation batches per epoch: {len(val_dataloader)}")
 
     encoder = None # Initialize encoder outside the if blocks
     decoder = None # Initialize decoder outside the if blocks
@@ -291,10 +296,11 @@ def main():
             surrogate_train_losses = []
             surrogate_val_losses = []
             surrogate_val_r2_scores = []
+            surrogate_val_mape_scores = []
 
             log_message("\nStarting Surrogate training loop...")
-            for epoch in range(args.epochs):
-                log_message(f"\n--- Epoch {epoch+1}/{args.epochs} (Surrogate Training) ---")
+            for epoch in range(args.surrogate_epochs):
+                log_message(f"\n--- Epoch {epoch+1}/{args.surrogate_epochs} (Surrogate Training) ---")
                 # Training
                 surrogate_model.train()
                 total_train_loss = 0
@@ -348,6 +354,12 @@ def main():
                         all_predictions.extend(predictions_val.cpu().numpy().flatten())
                         all_labels.extend(labels_val.cpu().numpy().flatten())
                 
+                # Calculate Mean Absolute Percentage Error (MAPE)
+                # Add a small epsilon to avoid division by zero
+                epsilon = 1e-8 
+                mape = np.mean(np.abs((np.array(all_labels) - np.array(all_predictions)) / (np.array(all_labels) + epsilon))) * 100
+                surrogate_val_mape_scores.append(mape)
+                
                 avg_val_loss = total_val_loss / (batch_idx_val + 1)
                 surrogate_val_losses.append(avg_val_loss)
                 
@@ -355,7 +367,7 @@ def main():
                 r2 = r2_score(all_labels, all_predictions)
                 surrogate_val_r2_scores.append(r2)
 
-                log_message(f"Epoch {epoch+1} finished. Train MAE: {avg_train_loss:.4f}, Val MAE: {avg_val_loss:.4f}, Val R^2: {r2:.4f}")
+                log_message(f"Epoch {epoch+1} finished. Train MAE: {avg_train_loss:.4f}, Val MAE: {avg_val_loss:.4f}, Val R^2: {r2:.4f}, Val MAPE: {mape:.2f}%")
             log_message("\nSurrogate Training loop finished.")
 
             # Plot Surrogate Convergence
@@ -381,6 +393,10 @@ def main():
             plt.savefig(os.path.join(run_log_dir, 'surrogate_r2_score.png'))
             plt.close()
             log_message(f"Surrogate R^2 score plot saved to {os.path.join(run_log_dir, 'surrogate_r2_score.png')}")
+
+
+
+
 
             if args.save_model:
                 model_dir = "models"
