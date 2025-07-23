@@ -26,6 +26,7 @@ def main():
     parser.add_argument('--heads', type=int, default=4, help='Number of attention heads')
     parser.add_argument('--d_ff', type=int, default=512, help='Feed-forward dimension in transformer blocks')
     parser.add_argument('--n_blocks', type=int, default=4, help='Number of transformer blocks')
+    parser.add_argument('--decoder_hidden_dim', type=int, default=256, help='Hidden dimension for decoder MLPs')
     parser.add_argument('--save_model', action='store_true', help='Save the trained models')
     parser.add_argument('--load_vae_model', type=str, default=None, help='Path to load pre-trained VAE models (encoder and decoder)')
     parser.add_argument('--load_surrogate_model', type=str, default=None, help='Path to load pre-trained surrogate model')
@@ -53,6 +54,7 @@ def main():
         args.heads = 1 # Single attention head
         args.d_ff = 32 # Reduced feed-forward dimension
         args.n_blocks = 1 # Single transformer block
+        args.decoder_hidden_dim = 16 # Drastically reduced decoder hidden dimension
 
     # Automatically save models if training both VAE and surrogate
     if args.train_mode == 'both':
@@ -87,7 +89,7 @@ def main():
         else:
             encoder = NemesisVAE(n_blocks=args.n_blocks, d0=args.d0, heads=args.heads, d_ff=args.d_ff).to(device)
             decoder_latent_dim = (args.d0 // 2) // 2
-        decoder = ModulatedResidualNet(in_features=3, out_features=1, latent_dim=decoder_latent_dim).to(device)
+        decoder = ModulatedResidualNet(in_features=3, out_features=1, latent_dim=decoder_latent_dim, hidden_dim=args.decoder_hidden_dim).to(device)
 
         log_message(f"\n--- VAE Model Configuration ---")
         log_message(f"Model: {args.model}")

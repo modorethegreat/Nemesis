@@ -2,33 +2,34 @@ import torch
 import torch.nn as nn
 
 class ModulatedResidualNet(nn.Module):
-    def __init__(self, in_features, out_features, latent_dim):
+    def __init__(self, in_features, out_features, latent_dim, hidden_dim=256):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
         self.latent_dim = latent_dim
+        self.hidden_dim = hidden_dim
 
         self.latent_lifting_mlp = nn.Sequential(
-            nn.Linear(latent_dim, 128),
+            nn.Linear(latent_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(128, 256) # Output size for modulation
+            nn.Linear(hidden_dim, hidden_dim) # Output size for modulation
         )
 
         self.query_lifting_mlp = nn.Sequential(
-            nn.Linear(in_features, 128),
+            nn.Linear(in_features, hidden_dim),
             nn.ReLU(),
-            nn.Linear(128, 256) # Output size to be modulated
+            nn.Linear(hidden_dim, hidden_dim) # Output size to be modulated
         )
 
         # Modulated Residual Blocks
         self.res_blocks = nn.ModuleList([
-            ModulatedResBlock(256, 256) for _ in range(3) # Example: 3 residual blocks
+            ModulatedResBlock(hidden_dim, hidden_dim) for _ in range(3) # Example: 3 residual blocks
         ])
 
         self.sdf_mlp = nn.Sequential(
-            nn.Linear(256, 128),
+            nn.Linear(hidden_dim, hidden_dim // 2),
             nn.ReLU(),
-            nn.Linear(128, out_features)
+            nn.Linear(hidden_dim // 2, out_features)
         )
 
     def forward(self, x, z):
