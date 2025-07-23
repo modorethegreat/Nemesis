@@ -1,10 +1,10 @@
 # LGM-1: Baseline Architecture (PhysicsX-style Encoder)
 
-The LGM-1 architecture serves as the baseline for comparison against the NEMESIS (LMA-based) architecture. It aims to replicate the encoder style found in PhysicsX's mesh-to-physical-property prediction pipeline, primarily utilizing a DiffusionNet-like approach for mesh encoding.
+The LGM-1 architecture serves as the baseline for comparison against the NEMESIS (LMA-based) architecture. It aims to replicate the encoder style found in PhysicsX's mesh-to-physical-property prediction pipeline, with the only difference in approach being that a simple MLP is used for mesh encoding.
 
 ## Encoder: DiffusionNet-style
 
-The core of the LGM-1 encoder is a DiffusionNet-style architecture. DiffusionNet is a neural network architecture designed for processing data on arbitrary meshes. It operates by defining a diffusion process on the mesh, allowing information to propagate across the mesh surface.
+The core of the LGM-1 encoder is a DiffusionNet-style architecture. DiffusionNet is a neural network architecture designed for processing data on arbitrary meshes. It operates by defining a diffusion process on the mesh, allowing information to propagate across the mesh surface. This has yet to be implemented for comparison in this repository.
 
 ### Mathematical Foundation (Conceptual)
 
