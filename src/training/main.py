@@ -17,7 +17,13 @@ from src.models.surrogate_models import BaselineSurrogate, NemesisSurrogate # Im
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', type=str, default='baseline', choices=['baseline', 'nemesis'])
-    parser.add_argument('--train_mode', type=str, default='vae', choices=['vae', 'surrogate', 'both'], help='Mode of training: vae or surrogate')
+    parser.add_argument(
+        '--train_mode',
+        type=str,
+        default='vae',
+        choices=['vae', 'surrogate', 'both', 'flow_inverse'],
+        help='Mode of training: vae, surrogate, joint, or inverse flow',
+    )
     parser.add_argument('--dataset', type=str, default='airfoil', choices=['airfoil'])
     parser.add_argument('--data_dir', type=str, default='data/deepmind-research/meshgraphnets/datasets')
     parser.add_argument('--num_points', type=int, default=2048)
@@ -35,7 +41,24 @@ def main():
     parser.add_argument('--save_model', action='store_true', help='Save the trained models')
     parser.add_argument('--load_vae_model', type=str, default=None, help='Path to load pre-trained VAE models (encoder and decoder)')
     parser.add_argument('--load_surrogate_model', type=str, default=None, help='Path to load pre-trained surrogate model')
+    parser.add_argument('--flow_dataset', type=str, default=None, help='Path or identifier for inverse flow training dataset')
+    parser.add_argument('--flow_batch_size', type=int, default=8, help='Batch size for flow inverse training')
+    parser.add_argument('--flow_epochs', type=int, default=20, help='Epochs for flow inverse training')
+    parser.add_argument('--flow_lr', type=float, default=1e-4, help='Learning rate for flow inverse trainer')
+    parser.add_argument('--flow_latent_dim', type=int, default=128, help='Latent dimension for flow inverse encoder')
+    parser.add_argument('--flow_hidden_dim', type=int, default=256, help='Hidden dimension for flow inverse models')
+    parser.add_argument('--flow_condition_dim', type=int, default=None, help='Conditioning dimension for flow inverse networks')
+    parser.add_argument('--flow_loss_geometry_weight', type=float, default=1.0, help='Weight for geometry reconstruction loss')
+    parser.add_argument('--flow_loss_flow_weight', type=float, default=0.1, help='Weight for flow consistency loss')
+    parser.add_argument('--flow_loss_latent_weight', type=float, default=1e-4, help='Weight for latent regularization term')
+    parser.add_argument('--flow_checkpoint_dir', type=str, default=None, help='Directory to store flow inverse checkpoints')
+    parser.add_argument('--flow_resume_path', type=str, default=None, help='Checkpoint path to resume flow inverse training')
+    parser.add_argument('--flow_log_every', type=int, default=10, help='Logging frequency (in batches) for flow inverse training')
+    parser.add_argument('--flow_val_split', type=float, default=0.1, help='Fraction of data reserved for validation in flow inverse training')
+    parser.add_argument('--flow_scheduler_step', type=int, default=None, help='Step interval for flow inverse learning rate scheduler')
+    parser.add_argument('--flow_scheduler_gamma', type=float, default=0.5, help='Gamma for flow inverse learning rate scheduler')
     parser.add_argument('--local', action='store_true')
+    parser.add_argument('--reynolds_number', type=float, default=None, help='Optional Reynolds number conditioning for flow inverse training')
     args = parser.parse_args()
 
     # Setup logging
@@ -61,6 +84,10 @@ def main():
         args.d_ff = 32 # Reduced feed-forward dimension
         args.n_blocks = 1 # Single transformer block
         args.decoder_hidden_dim = 16 # Drastically reduced decoder hidden dimension
+        args.flow_batch_size = 1
+        args.flow_epochs = 1
+        args.flow_latent_dim = min(args.flow_latent_dim, 16)
+        args.flow_hidden_dim = min(args.flow_hidden_dim, 32)
     else:
         # Apply scaling based on args.scale
         if args.scale == '3x':
@@ -76,6 +103,13 @@ def main():
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     log_message(f"Device = {device}")
+
+    if args.train_mode == 'flow_inverse':
+        from src.training.inverse_trainer import run_flow_inverse_training
+
+        run_flow_inverse_training(args, log_message, device)
+        log_file.close()
+        return
 
     # Ensure dataset is downloaded
     dataset_path = os.path.join(args.data_dir, args.dataset)
