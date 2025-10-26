@@ -16,6 +16,16 @@ To develop and evaluate a new architecture that leverages Latent Meta Attention 
 
 We utilize the **MeshGraphNets** dataset from DeepMind Research. For the current implementation, we focus on the **Airfoil Flow** task, where the surrogate model predicts the **Average Pressure** from the mesh data.
 
+### Data loader outputs
+
+`MeshDataset` emits a dictionary per sample containing:
+
+* `points` and `normals`: `(num_points, 3)` surface samples and normals.
+* `cells`: `(F, 3)` mesh connectivity for the final simulation frame.
+* `sdf_points` and `sdf_values`: `(num_sdf_points, 3)` queries and their signed distances.
+* `label`: scalar regression target (average pressure in the last frame).
+* Dense flow tensors for each variable-length field (e.g. `velocity`, `pressure`) with shape `(trajectory_length, max_nodes, feature_dim)` and matching `<feature>_lengths` arrays of shape `(trajectory_length,)` that record the original node counts per time step.
+
 ## Architecture Overview
 
 The pipeline consists of two main phases:
