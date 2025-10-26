@@ -6,7 +6,6 @@ import numpy as np
 import trimesh
 import json
 import os
-import itertools # Import itertools
 from src.data_processing.mesh_data_extractor import sample_points_from_mesh, normalize_point_cloud, generate_sdf
 
 # The following functions are adapted from the MeshGraphNets repository
@@ -34,13 +33,27 @@ def _parse_function(example_proto, meta):
         out[key] = data
     return out
 
-def get_tfrecord_iterator(tfrecord_path):
-    with open(os.path.join(os.path.dirname(tfrecord_path), 'meta.json'), 'r') as fp:
+def _load_meta(tfrecord_path):
+    meta_path = os.path.join(os.path.dirname(tfrecord_path), 'meta.json')
+    with open(meta_path, 'r') as fp:
         meta = json.loads(fp.read())
+    return meta
 
+
+def _get_tfrecord_dataset(tfrecord_path, meta):
     dataset = tf.data.TFRecordDataset(tfrecord_path)
     dataset = dataset.map(lambda x: _parse_function(x, meta))
-    return dataset.as_numpy_iterator()
+    return dataset
+
+
+def _get_length_from_meta(meta):
+    for key in ('num_samples', 'num_records', 'num_examples', 'count', 'dataset_length', 'length'):
+        if key in meta:
+            try:
+                return int(meta[key])
+            except (TypeError, ValueError):
+                continue
+    return None
 
 def get_target_property(record):
     # For airfoil, use the average pressure at the last time step
@@ -68,11 +81,28 @@ class MeshDataset(Dataset):
         self.tfrecord_path = tfrecord_path
         self.num_points = num_points
         self.num_sdf_points = num_sdf_points
-        
-        # Load a limited number of samples for local mode, otherwise load all
+
+        self.meta = _load_meta(tfrecord_path)
+        base_dataset = _get_tfrecord_dataset(tfrecord_path, self.meta)
+
+        full_length = _get_length_from_meta(self.meta)
+        if full_length is None:
+            cardinality = tf.data.experimental.cardinality(base_dataset)
+            if cardinality == tf.data.experimental.UNKNOWN_CARDINALITY:
+                # Materialise a count without keeping records in memory
+                full_length = sum(1 for _ in base_dataset)
+                base_dataset = _get_tfrecord_dataset(tfrecord_path, self.meta)
+            else:
+                full_length = int(cardinality.numpy())
+
         if is_local:
-            # Load only a few batches for quick local testing
-            self.dataset = list(itertools.islice(get_tfrecord_iterator(tfrecord_path), batch_size * 2)) # Load 2 batches worth
+            requested = batch_size * 2
+            if full_length is None:
+                self.length = requested
+                dataset = base_dataset.take(requested)
+            else:
+                self.length = min(full_length, requested)
+                dataset = base_dataset.take(self.length)
         else:
             # Load the entire dataset into memory (for full training)
             self.dataset = list(get_tfrecord_iterator(tfrecord_path))
@@ -89,7 +119,16 @@ class MeshDataset(Dataset):
         return self.length
 
     def __getitem__(self, idx):
-        record = self.dataset[idx]
+        if idx < 0 or idx >= len(self):
+            raise IndexError('Index out of range')
+
+        dataset_slice = self._dataset.skip(idx).take(1)
+        try:
+            record = next(iter(dataset_slice))
+        except StopIteration:
+            raise IndexError('Index out of range')
+
+        record = tf.nest.map_structure(lambda x: x.numpy() if hasattr(x, 'numpy') else x, record)
 
         if 'mesh_pos' in record:
             positions = record['mesh_pos'][-1]
